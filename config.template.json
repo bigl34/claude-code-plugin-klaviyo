@@ -1,0 +1,5 @@
+{
+  "_comment": "Copy this file to config.json and fill in your values",
+  "api_key": "YOUR_API_KEY",
+  "base_url": "https://api.example.com"
+}
