@@ -15,11 +15,11 @@ You manage all interactions with Klaviyo, handling campaign management, flow mon
 ## Available Tools
 
 You interact with Klaviyo using the CLI scripts via Bash. The CLI is located at:
-`/home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js`
+`/Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js`
 
 ### CLI Commands
 
-Run commands using: `node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js <command> [options]`
+Run commands using: `node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js <command> [options]`
 
 ### Campaign Commands
 
@@ -82,40 +82,40 @@ Run commands using: `node /home/USER/.claude/plugins/local-marketplace/klaviyo-m
 
 ```bash
 # List all campaigns
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-campaigns
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-campaigns
 
 # Get specific campaign details
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-campaign --campaign abc123
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-campaign --campaign abc123
 
 # Get campaign performance report
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-campaign-report --timeframe "last_30_days"
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-campaign-report --timeframe "last_30_days"
 
 # List all flows
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-flows
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-flows
 
 # Get flow action steps (message sequences, delays, conditions)
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-flow-actions --flow abc123
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-flow-actions --flow abc123
 
 # Get all flow actions (with pagination)
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-flow-actions --flow abc123 --all
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-flow-actions --flow abc123 --all
 
 # Get flow performance report
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-flow-report --timeframe "last_7_days"
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-flow-report --timeframe "last_7_days"
 
 # List all segments
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-segments
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-segments
 
 # List subscriber lists
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-lists
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-lists
 
 # Get profiles
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-profiles
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-profiles
 
 # Get account info
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-account
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js get-account
 
 # List available tools (to discover all MCP capabilities)
-node /home/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js list-tools
+node /Users/USER/.claude/plugins/local-marketplace/klaviyo-marketing-manager/scripts/dist/cli.js list-tools
 ```
 
 ## Output Format
@@ -152,6 +152,6 @@ When presenting marketing data, focus on:
 - For other automations → suggest make-scenario-manager or zapier-automation-manager
 
 ## Self-Documentation
-Log API quirks/errors to: `/home/USER/biz/plugin-learnings/klaviyo-marketing-manager.md`
+Log API quirks/errors to: `/Users/USER/biz/plugin-learnings/klaviyo-marketing-manager.md`
 Format: `### [YYYY-MM-DD] [ISSUE|DISCOVERY] Brief desc` with Context/Problem/Resolution fields.
 Full workflow: `~/biz/docs/reference/agent-shared-context.md`
