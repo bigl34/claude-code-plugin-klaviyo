@@ -124,40 +124,40 @@ node scripts/dist/cli.js get-campaigns
 
 ```bash
 # List all campaigns
-node scripts/dist/cli.js get-campaigns
+node /Users/USER/node scripts/dist/cli.js get-campaigns
 
 # Get specific campaign details
-node scripts/dist/cli.js get-campaign --campaign abc123
+node /Users/USER/node scripts/dist/cli.js get-campaign --campaign abc123
 
 # Get campaign performance report
-node scripts/dist/cli.js get-campaign-report --timeframe "last_30_days"
+node /Users/USER/node scripts/dist/cli.js get-campaign-report --timeframe "last_30_days"
 
 # List all flows
-node scripts/dist/cli.js get-flows
+node /Users/USER/node scripts/dist/cli.js get-flows
 
 # Get flow action steps (message sequences, delays, conditions)
-node scripts/dist/cli.js get-flow-actions --flow abc123
+node /Users/USER/node scripts/dist/cli.js get-flow-actions --flow abc123
 
 # Get all flow actions (with pagination)
-node scripts/dist/cli.js get-flow-actions --flow abc123 --all
+node /Users/USER/node scripts/dist/cli.js get-flow-actions --flow abc123 --all
 
 # Get flow performance report
-node scripts/dist/cli.js get-flow-report --timeframe "last_7_days"
+node /Users/USER/node scripts/dist/cli.js get-flow-report --timeframe "last_7_days"
 
 # List all segments
-node scripts/dist/cli.js get-segments
+node /Users/USER/node scripts/dist/cli.js get-segments
 
 # List subscriber lists
-node scripts/dist/cli.js get-lists
+node /Users/USER/node scripts/dist/cli.js get-lists
 
 # Get profiles
-node scripts/dist/cli.js get-profiles
+node /Users/USER/node scripts/dist/cli.js get-profiles
 
 # Get account info
-node scripts/dist/cli.js get-account
+node /Users/USER/node scripts/dist/cli.js get-account
 
 # List available tools (to discover all MCP capabilities)
-node scripts/dist/cli.js list-tools
+node /Users/USER/node scripts/dist/cli.js list-tools
 ```
 
 ## How It Works
