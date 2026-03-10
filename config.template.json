@@ -1,0 +1,4 @@
+{
+  "_comment": "Copy this to config.json and fill in your values",
+  "credentials_path": "/path/to/your/credentials"
+}
