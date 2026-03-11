@@ -42,7 +42,7 @@ Dedicated agent for Klaviyo email marketing operations via direct API
 ## Quick Start
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USER/claude-code-plugin-klaviyo.git
+git clone https://github.com/bigl34/claude-code-plugin-klaviyo.git
 cd claude-code-plugin-klaviyo
 cp config.template.json config.json  # fill in your credentials
 cd scripts && npm install
