@@ -3,7 +3,7 @@
 
 Dedicated agent for Klaviyo email marketing operations via direct API
 
-![Version](https://img.shields.io/badge/version-1.2.10-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Version](https://img.shields.io/badge/version-1.4.0-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 ## Features
 
@@ -60,14 +60,6 @@ node scripts/dist/cli.js get-campaigns
    ```bash
    cd scripts && npm install
    ```
-
-## Configuration
-
-Copy `config.template.json` to `config.json` and fill in the required values:
-
-| Field | Placeholder |
-|-------|-------------|
-| `credentials_path` | `/path/to/your/credentials` |
 
 ## Available Commands
 
@@ -132,40 +124,40 @@ Copy `config.template.json` to `config.json` and fill in the required values:
 
 ```bash
 # List all campaigns
-node /Users/USER/node scripts/dist/cli.js get-campaigns
+node $HOME/node scripts/dist/cli.js get-campaigns
 
 # Get specific campaign details
-node /Users/USER/node scripts/dist/cli.js get-campaign --campaign abc123
+node $HOME/node scripts/dist/cli.js get-campaign --campaign abc123
 
 # Get campaign performance report
-node /Users/USER/node scripts/dist/cli.js get-campaign-report --timeframe "last_30_days"
+node $HOME/node scripts/dist/cli.js get-campaign-report --timeframe "last_30_days"
 
 # List all flows
-node /Users/USER/node scripts/dist/cli.js get-flows
+node $HOME/node scripts/dist/cli.js get-flows
 
 # Get flow action steps (message sequences, delays, conditions)
-node /Users/USER/node scripts/dist/cli.js get-flow-actions --flow abc123
+node $HOME/node scripts/dist/cli.js get-flow-actions --flow abc123
 
 # Get all flow actions (with pagination)
-node /Users/USER/node scripts/dist/cli.js get-flow-actions --flow abc123 --all
+node $HOME/node scripts/dist/cli.js get-flow-actions --flow abc123 --all
 
 # Get flow performance report
-node /Users/USER/node scripts/dist/cli.js get-flow-report --timeframe "last_7_days"
+node $HOME/node scripts/dist/cli.js get-flow-report --timeframe "last_7_days"
 
 # List all segments
-node /Users/USER/node scripts/dist/cli.js get-segments
+node $HOME/node scripts/dist/cli.js get-segments
 
 # List subscriber lists
-node /Users/USER/node scripts/dist/cli.js get-lists
+node $HOME/node scripts/dist/cli.js get-lists
 
 # Get profiles
-node /Users/USER/node scripts/dist/cli.js get-profiles
+node $HOME/node scripts/dist/cli.js get-profiles
 
 # Get account info
-node /Users/USER/node scripts/dist/cli.js get-account
+node $HOME/node scripts/dist/cli.js get-account
 
 # List available tools (to discover all MCP capabilities)
-node /Users/USER/node scripts/dist/cli.js list-tools
+node $HOME/node scripts/dist/cli.js list-tools
 ```
 
 ## How It Works
