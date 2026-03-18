@@ -5,7 +5,7 @@
  * Zod-validated CLI for Klaviyo marketing operations.
  */
 
-import { z, createCommand, runCli, cacheCommands, cliTypes } from "@local/cli-utils";
+import { z, createCommand, runCli, cacheCommands, cliTypes, wrapUntrustedField, buildSafeOutput } from "@local/cli-utils";
 import { KlaviyoClient } from "./klaviyo-client.js";
 
 // Define commands with Zod schemas
@@ -26,7 +26,30 @@ const commands = {
       const { filter, channel } = args as {
         filter?: string; channel?: "email" | "sms" | "mobile_push";
       };
-      return client.getCampaigns({ filter, channel });
+      const result = await client.getCampaigns({ filter, channel });
+
+      const campaigns = (result?.data || result || []);
+      const wrappedCampaigns = (Array.isArray(campaigns) ? campaigns : []).map((c: any) => {
+        const attrs = c.attributes || c;
+        return {
+          metadata: {
+            id: c.id,
+            status: attrs.status,
+            channel: attrs.channel || channel,
+            send_time: attrs.send_time || attrs.scheduled_at,
+          },
+          content: {
+            name: wrapUntrustedField("name", attrs.name, { maxChars: 200 }),
+            subject: wrapUntrustedField("subject", attrs.subject || attrs.message?.subject, { maxChars: 500 }),
+            previewText: wrapUntrustedField("preview_text", attrs.preview_text || attrs.message?.preview_text, { maxChars: 500 }),
+          },
+        };
+      });
+
+      return buildSafeOutput(
+        { command: "get-campaigns", count: wrappedCampaigns.length },
+        { campaigns: wrappedCampaigns }
+      );
     },
     "List all campaigns"
   ),
@@ -37,7 +60,24 @@ const commands = {
     }),
     async (args, client: KlaviyoClient) => {
       const { campaign } = args as { campaign: string };
-      return client.getCampaign(campaign);
+      const result = await client.getCampaign(campaign);
+
+      const c = result?.data || result;
+      const attrs: any = c.attributes || c;
+      return buildSafeOutput(
+        {
+          command: "get-campaign",
+          id: c.id,
+          status: attrs.status,
+          channel: attrs.channel,
+          send_time: attrs.send_time || attrs.scheduled_at,
+        },
+        {
+          name: wrapUntrustedField("name", attrs.name, { maxChars: 200 }),
+          subject: wrapUntrustedField("subject", attrs.subject || attrs.message?.subject, { maxChars: 500 }),
+          previewText: wrapUntrustedField("preview_text", attrs.preview_text || attrs.message?.preview_text, { maxChars: 500 }),
+        }
+      );
     },
     "Get campaign details"
   ),
@@ -97,7 +137,27 @@ const commands = {
     }),
     async (args, client: KlaviyoClient) => {
       const { filter } = args as { filter?: string };
-      return client.getFlows({ filter });
+      const result = await client.getFlows({ filter });
+
+      const flows = (result?.data || result || []);
+      const wrappedFlows = (Array.isArray(flows) ? flows : []).map((f: any) => {
+        const attrs = f.attributes || f;
+        return {
+          metadata: {
+            id: f.id,
+            status: attrs.status,
+            trigger_type: attrs.trigger_type,
+          },
+          content: {
+            name: wrapUntrustedField("name", attrs.name, { maxChars: 200 }),
+          },
+        };
+      });
+
+      return buildSafeOutput(
+        { command: "get-flows", count: wrappedFlows.length },
+        { flows: wrappedFlows }
+      );
     },
     "List all flows"
   ),
@@ -108,7 +168,21 @@ const commands = {
     }),
     async (args, client: KlaviyoClient) => {
       const { flow } = args as { flow: string };
-      return client.getFlow(flow);
+      const result = await client.getFlow(flow);
+
+      const f = result?.data || result;
+      const attrs: any = f.attributes || f;
+      return buildSafeOutput(
+        {
+          command: "get-flow",
+          id: f.id,
+          status: attrs.status,
+          trigger_type: attrs.trigger_type,
+        },
+        {
+          name: wrapUntrustedField("name", attrs.name, { maxChars: 200 }),
+        }
+      );
     },
     "Get flow details"
   ),
@@ -120,11 +194,33 @@ const commands = {
     }),
     async (args, client: KlaviyoClient) => {
       const { flow, all } = args as { flow: string; all?: boolean };
+      let result;
       if (all) {
         const actions = await client.getAllFlowActions(flow);
-        return { data: actions, totalCount: actions.length };
+        result = { data: actions, totalCount: actions.length };
+      } else {
+        result = await client.getFlowActions(flow);
       }
-      return client.getFlowActions(flow);
+
+      const actions = (result?.data || []);
+      const wrappedActions = (Array.isArray(actions) ? actions : []).map((a: any) => {
+        const attrs = a.attributes || a;
+        return {
+          metadata: {
+            id: a.id,
+            type: attrs.action_type || attrs.type,
+            status: attrs.status,
+          },
+          content: {
+            name: wrapUntrustedField("name", attrs.settings?.subject || attrs.name, { maxChars: 200 }),
+          },
+        };
+      });
+
+      return buildSafeOutput(
+        { command: "get-flow-actions", flow, count: wrappedActions.length },
+        { actions: wrappedActions }
+      );
     },
     "Get actions (steps) for a flow"
   ),
@@ -153,7 +249,28 @@ const commands = {
   // ==================== Segments ====================
   "get-segments": createCommand(
     z.object({}),
-    async (_args, client: KlaviyoClient) => client.getSegments(),
+    async (_args, client: KlaviyoClient) => {
+      const result = await client.getSegments();
+
+      const segments = (result?.data || result || []);
+      const wrappedSegments = (Array.isArray(segments) ? segments : []).map((s: any) => {
+        const attrs = s.attributes || s;
+        return {
+          metadata: {
+            id: s.id,
+            profile_count: attrs.profile_count,
+          },
+          content: {
+            name: wrapUntrustedField("name", attrs.name, { maxChars: 200 }),
+          },
+        };
+      });
+
+      return buildSafeOutput(
+        { command: "get-segments", count: wrappedSegments.length },
+        { segments: wrappedSegments }
+      );
+    },
     "List all segments"
   ),
 
@@ -163,7 +280,14 @@ const commands = {
     }),
     async (args, client: KlaviyoClient) => {
       const { segment } = args as { segment: string };
-      return client.getSegment(segment);
+      const result = await client.getSegment(segment);
+
+      const s = result?.data || result;
+      const attrs: any = s.attributes || s;
+      return buildSafeOutput(
+        { command: "get-segment", id: s.id, profile_count: attrs.profile_count },
+        { name: wrapUntrustedField("name", attrs.name, { maxChars: 200 }) }
+      );
     },
     "Get segment details"
   ),
@@ -171,7 +295,28 @@ const commands = {
   // ==================== Lists ====================
   "get-lists": createCommand(
     z.object({}),
-    async (_args, client: KlaviyoClient) => client.getLists(),
+    async (_args, client: KlaviyoClient) => {
+      const result = await client.getLists();
+
+      const lists = (result?.data || result || []);
+      const wrappedLists = (Array.isArray(lists) ? lists : []).map((l: any) => {
+        const attrs = l.attributes || l;
+        return {
+          metadata: {
+            id: l.id,
+            profile_count: attrs.profile_count,
+          },
+          content: {
+            name: wrapUntrustedField("name", attrs.name, { maxChars: 200 }),
+          },
+        };
+      });
+
+      return buildSafeOutput(
+        { command: "get-lists", count: wrappedLists.length },
+        { lists: wrappedLists }
+      );
+    },
     "List all subscriber lists"
   ),
 
@@ -181,7 +326,14 @@ const commands = {
     }),
     async (args, client: KlaviyoClient) => {
       const { list } = args as { list: string };
-      return client.getList(list);
+      const result = await client.getList(list);
+
+      const l = result?.data || result;
+      const attrs: any = l.attributes || l;
+      return buildSafeOutput(
+        { command: "get-list", id: l.id, profile_count: attrs.profile_count },
+        { name: wrapUntrustedField("name", attrs.name, { maxChars: 200 }) }
+      );
     },
     "Get list details"
   ),
@@ -193,7 +345,21 @@ const commands = {
     }),
     async (args, client: KlaviyoClient) => {
       const { profile } = args as { profile: string };
-      return client.getProfile(profile);
+      const result = await client.getProfile(profile);
+
+      const p = result?.data || result;
+      const attrs: any = p.attributes || p;
+      return buildSafeOutput(
+        { command: "get-profile", id: p.id },
+        {
+          email: wrapUntrustedField("email", attrs.email, { maxChars: 200 }),
+          firstName: wrapUntrustedField("first_name", attrs.first_name, { maxChars: 200 }),
+          lastName: wrapUntrustedField("last_name", attrs.last_name, { maxChars: 200 }),
+          phone: wrapUntrustedField("phone_number", attrs.phone_number, { maxChars: 200 }),
+          title: wrapUntrustedField("title", attrs.title, { maxChars: 200 }),
+          organization: wrapUntrustedField("organization", attrs.organization, { maxChars: 200 }),
+        }
+      );
     },
     "Get a profile by ID"
   ),
@@ -204,7 +370,28 @@ const commands = {
     }),
     async (args, client: KlaviyoClient) => {
       const { filter } = args as { filter?: string };
-      return client.getProfiles({ filter });
+      const result = await client.getProfiles({ filter });
+
+      const profiles = (result?.data || result || []);
+      const wrappedProfiles = (Array.isArray(profiles) ? profiles : []).map((p: any) => {
+        const attrs = p.attributes || p;
+        return {
+          metadata: { id: p.id },
+          content: {
+            email: wrapUntrustedField("email", attrs.email, { maxChars: 200 }),
+            firstName: wrapUntrustedField("first_name", attrs.first_name, { maxChars: 200 }),
+            lastName: wrapUntrustedField("last_name", attrs.last_name, { maxChars: 200 }),
+            phone: wrapUntrustedField("phone_number", attrs.phone_number, { maxChars: 200 }),
+            title: wrapUntrustedField("title", attrs.title, { maxChars: 200 }),
+            organization: wrapUntrustedField("organization", attrs.organization, { maxChars: 200 }),
+          },
+        };
+      });
+
+      return buildSafeOutput(
+        { command: "get-profiles", count: wrappedProfiles.length },
+        { profiles: wrappedProfiles }
+      );
     },
     "Get profiles (with optional filter)"
   ),
