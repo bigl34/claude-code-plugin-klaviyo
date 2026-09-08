@@ -3,13 +3,14 @@
 
 Dedicated agent for Klaviyo email marketing operations via direct API
 
-![Version](https://img.shields.io/badge/version-1.4.0-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Version](https://img.shields.io/badge/version-1.6.0-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 ## Features
 
 - Campaign
 - **get-campaigns** — List all campaigns
 - **get-campaign** — Get campaign details
+- **get-campaign-messages** — Read-only: get actual message subject, preview, sender fields, and parent-campaign tracking settings
 - **get-campaign-report** — Get performance metrics
 - Flow
 - **get-flows** — List all flows
@@ -28,6 +29,15 @@ Dedicated agent for Klaviyo email marketing operations via direct API
 - Metrics
 - **get-metrics** — List tracked metrics
 - **get-metric** — Get metric details
+- **get-metric-event-volume** — Query count event volume for one metric
+- Form
+- **get-forms** — List form metadata
+- **get-form** — Get form metadata
+- **get-form-versions** — List version metadata for a form
+- **get-form-version** — Get form-version metadata
+- Template
+- **list-templates** — List saved/library email templates
+- **get-template** — Get one template directly or through a flow message
 - Account
 - **get-account** — Get account info
 - Discovery
@@ -45,11 +55,11 @@ Dedicated agent for Klaviyo email marketing operations via direct API
 git clone https://github.com/bigl34/claude-code-plugin-klaviyo.git
 cd claude-code-plugin-klaviyo
 cp config.template.json config.json  # fill in your credentials
-cd scripts && npm install
+npm --prefix scripts install
 ```
 
 ```bash
-node scripts/dist/cli.js get-campaigns
+npm --prefix scripts run cli -- get-campaigns
 ```
 
 ## Installation
@@ -65,20 +75,21 @@ node scripts/dist/cli.js get-campaigns
 
 ### Campaign Commands
 
-| Command               | Description             | Options                                                         |
-| --------------------- | ----------------------- | --------------------------------------------------------------- |
-| `get-campaigns`       | List all campaigns      | `--filter`, `--channel` (email/sms/mobile_push, default: email) |
-| `get-campaign`        | Get campaign details    | `--campaign` (required)                                         |
-| `get-campaign-report` | Get performance metrics | `--timeframe`, `--statistics`, `--conversion-metric`            |
+| Command                 | Description                                                                                          | Options                                                         |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `get-campaigns`         | List all campaigns                                                                                   | `--filter`, `--channel` (email/sms/mobile_push, default: email) |
+| `get-campaign`          | Get campaign details                                                                                 | `--campaign` (required)                                         |
+| `get-campaign-messages` | Read-only: get actual message subject, preview, sender fields, and parent-campaign tracking settings | `--campaign` (required)                                         |
+| `get-campaign-report`   | Get performance metrics                                                                              | `--timeframe`, `--statistics`, `--conversion-metric`            |
 
 ### Flow Commands
 
-| Command            | Description           | Options                                               |
-| ------------------ | --------------------- | ----------------------------------------------------- |
-| `get-flows`        | List all flows        | `--filter`                                            |
-| `get-flow`         | Get flow details      | `--flow` (required)                                   |
-| `get-flow-actions` | Get flow action steps | `--flow` (required), `--all` (optional, paginate all) |
-| `get-flow-report`  | Get flow performance  | `--timeframe`                                         |
+| Command            | Description           | Options                                                  |
+| ------------------ | --------------------- | -------------------------------------------------------- |
+| `get-flows`        | List all flows        | `--filter`                                               |
+| `get-flow`         | Get flow details      | `--flow` (required)                                      |
+| `get-flow-actions` | Get flow action steps | `--flow` (required), `--all` (optional, paginate all)    |
+| `get-flow-report`  | Get flow performance  | `--timeframe`, `--conversion-metric` (optional override) |
 
 ### Segment Commands
 
@@ -103,10 +114,27 @@ node scripts/dist/cli.js get-campaigns
 
 ### Metrics Commands
 
-| Command       | Description          | Options               |
-| ------------- | -------------------- | --------------------- |
-| `get-metrics` | List tracked metrics | -                     |
-| `get-metric`  | Get metric details   | `--metric` (required) |
+| Command                   | Description                             | Options                                                                                                                             |
+| ------------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `get-metrics`             | List tracked metrics                    | -                                                                                                                                   |
+| `get-metric`              | Get metric details                      | `--metric` (required)                                                                                                               |
+| `get-metric-event-volume` | Query count event volume for one metric | exactly one of `--metric-id` or `--metric-name`, plus `--start`, `--end`, optional `--interval` (hour/day/week/month), `--timezone` |
+
+### Form Commands
+
+| Command             | Description                      | Options                                                              |
+| ------------------- | -------------------------------- | -------------------------------------------------------------------- |
+| `get-forms`         | List form metadata               | `--filter`, `--page-size`, `--cursor`, `--sort`                      |
+| `get-form`          | Get form metadata                | `--form` (required)                                                  |
+| `get-form-versions` | List version metadata for a form | `--form` (required), `--filter`, `--page-size`, `--cursor`, `--sort` |
+| `get-form-version`  | Get form-version metadata        | `--version` (required)                                               |
+
+### Template Commands
+
+| Command          | Description                                         | Options                                         |
+| ---------------- | --------------------------------------------------- | ----------------------------------------------- |
+| `list-templates` | List saved/library email templates                  | `--page-size` (1-10), `--cursor`, `--all`       |
+| `get-template`   | Get one template directly or through a flow message | exactly one of `--template` or `--flow-message` |
 
 ### Account Commands
 
@@ -124,40 +152,57 @@ node scripts/dist/cli.js get-campaigns
 
 ```bash
 # List all campaigns
-node $HOME/node scripts/dist/cli.js get-campaigns
+npm --prefix "scripts" run cli -- get-campaigns
 
 # Get specific campaign details
-node $HOME/node scripts/dist/cli.js get-campaign --campaign abc123
+npm --prefix "scripts" run cli -- get-campaign --campaign abc123
+
+# Get actual message-local subject/sender fields and parent campaign tracking settings
+npm --prefix "scripts" run cli -- get-campaign-messages --campaign abc123
 
 # Get campaign performance report
-node $HOME/node scripts/dist/cli.js get-campaign-report --timeframe "last_30_days"
+npm --prefix "scripts" run cli -- get-campaign-report --timeframe "last_30_days"
 
 # List all flows
-node $HOME/node scripts/dist/cli.js get-flows
+npm --prefix "scripts" run cli -- get-flows
 
 # Get flow action steps (message sequences, delays, conditions)
-node $HOME/node scripts/dist/cli.js get-flow-actions --flow abc123
+npm --prefix "scripts" run cli -- get-flow-actions --flow abc123
 
 # Get all flow actions (with pagination)
-node $HOME/node scripts/dist/cli.js get-flow-actions --flow abc123 --all
+npm --prefix "scripts" run cli -- get-flow-actions --flow abc123 --all
 
 # Get flow performance report
-node $HOME/node scripts/dist/cli.js get-flow-report --timeframe "last_7_days"
+npm --prefix "scripts" run cli -- get-flow-report --timeframe "last_7_days"
 
 # List all segments
-node $HOME/node scripts/dist/cli.js get-segments
+npm --prefix "scripts" run cli -- get-segments
 
 # List subscriber lists
-node $HOME/node scripts/dist/cli.js get-lists
+npm --prefix "scripts" run cli -- get-lists
 
 # Get profiles
-node $HOME/node scripts/dist/cli.js get-profiles
+npm --prefix "scripts" run cli -- get-profiles
+
+# Query event volume for a known metric ID
+npm --prefix "scripts" run cli -- get-metric-event-volume --metric-id METRIC_ID --start "2026-07-01T00:00:00" --end "2026-07-03T00:00:00" --interval day --timezone "Europe/London"
+
+# Query event volume by exact case-insensitive metric name
+npm --prefix "scripts" run cli -- get-metric-event-volume --metric-name "Placed Order" --start "2026-07-01T00:00:00" --end "2026-07-03T00:00:00"
+
+# List form and form-version metadata
+npm --prefix "scripts" run cli -- get-forms
+npm --prefix "scripts" run cli -- get-form-versions --form FORM_ID
+
+# List all saved templates, or fetch a flow-managed template
+npm --prefix "scripts" run cli -- list-templates --all
+npm --prefix "scripts" run cli -- get-template --flow-message FLOW_MESSAGE_ID
 
 # Get account info
-node $HOME/node scripts/dist/cli.js get-account
+npm --prefix "scripts" run cli -- get-account
 
 # List available tools (to discover all MCP capabilities)
-node $HOME/node scripts/dist/cli.js list-tools
+npm --prefix "scripts" run cli -- list-tools
 ```
 
 ## How It Works
@@ -175,8 +220,11 @@ This plugin connects directly to the service's HTTP API. The CLI handles authent
 
 ## Known Limitations
 
-- **No list-templates command**: The Klaviyo MCP server does not expose a tool to list all templates. You can only fetch a specific template by ID using `get-email-template`.
+- **Saved and flow-managed templates differ**: `list-templates` covers the
+  saved/library collection. Resolve flow-managed content through
+  `get-template --flow-message`.
 - **Channel required for campaigns**: The `get-campaigns` command defaults to `email` channel. Use `--channel sms` or `--channel mobile_push` for other types.
+- **Forms are metadata-only**: The Forms API exposes form and form-version resources. This CLI intentionally limits form commands to metadata and does not fetch rendered form HTML or final copy.
 
 ## Contributing
 

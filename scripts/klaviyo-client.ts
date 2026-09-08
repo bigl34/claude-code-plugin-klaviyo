@@ -1,44 +1,41 @@
-/**
- * Klaviyo API Client
- *
- * Direct client for the Klaviyo REST API v2024-10-15 using Private API Key authentication.
- * Handles email marketing campaigns, flows, segments, lists, and profiles.
- * Configuration from config.json with API key.
- *
- * Key features:
- * - Campaign management and performance reports
- * - Automation flow tracking
- * - Segment and list management
- * - Profile lookup and filtering
- * - Metric tracking for conversion attribution
- */
 
-import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import {
+  loadServiceConfig,
+  normalizeLegacyMcpConfig,
+  z,
+} from "@local/cli-utils";
 import { PluginCache, TTL, createCacheKey } from "@local/plugin-cache";
+import { fetchWithRetry, sleep } from "./vendor/retry/index.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Klaviyo API revision version
-const API_REVISION = "2024-10-15";
+export const API_REVISION = "2026-04-15";
 const BASE_URL = "https://a.klaviyo.com/api";
-const DEFAULT_TIMEOUT = 30000; // 30 seconds
+const DEFAULT_TIMEOUT = 30000;
+const CAMPAIGN_FIELDS = [
+  "name",
+  "status",
+  "archived",
+  "audiences",
+  "send_options",
+  "tracking_options",
+  "created_at",
+  "updated_at",
+  "scheduled_at",
+  "send_time",
+].join(",");
 
-interface KlaviyoConfig {
-  apiKey: string;
-}
-
-interface ConfigFile {
-  klaviyo?: KlaviyoConfig;
-  // Support legacy MCP config format for migration
-  mcpServer?: {
-    env?: {
-      PRIVATE_API_KEY?: string;
-    };
+type JsonObject = Record<string, unknown>;
+type ReportRequestBody = {
+  data: {
+    type: string;
+    attributes: JsonObject;
   };
-}
+};
+
+const KlaviyoConfigSchema = z.object({
+  klaviyo: z.object({
+    apiKey: z.string().min(1),
+  }),
+});
 
 interface Campaign {
   id: string;
@@ -47,14 +44,15 @@ interface Campaign {
     name: string;
     status: string;
     archived: boolean;
-    audiences?: any;
-    send_options?: any;
+    audiences?: JsonObject;
+    send_options?: JsonObject;
+    tracking_options?: JsonObject;
     created_at?: string;
     updated_at?: string;
     scheduled_at?: string;
     send_time?: string;
   };
-  relationships?: any;
+  relationships?: JsonObject;
 }
 
 interface Flow {
@@ -65,30 +63,100 @@ interface Flow {
     status: string;
     archived: boolean;
     trigger_type?: string;
+    definition?: {
+      triggers?: Array<Record<string, unknown>>;
+      trigger_filter?: unknown;
+      flow_filter?: unknown;
+      [key: string]: unknown;
+    };
     created?: string;
     updated?: string;
   };
 }
 
-interface FlowAction {
+export interface CampaignMessage {
   id: string;
   type: string;
   attributes: {
-    action_type: string;
-    status: string;
+    definition?: {
+      channel?: CampaignChannel;
+      label?: string;
+      content?: {
+        subject?: string;
+        preview_text?: string;
+        from_email?: string;
+        from_label?: string;
+        reply_to_email?: string | null;
+        cc_email?: string | null;
+        bcc_email?: string | null;
+        [key: string]: unknown;
+      };
+      [key: string]: unknown;
+    };
+    send_times?: Array<{
+      datetime?: string;
+      is_local?: boolean;
+      [key: string]: unknown;
+    }>;
+    created_at?: string;
+    updated_at?: string;
+  };
+}
+
+export interface FlowActionDefinition {
+  type?: string;
+  data?: {
+    unit?: string;
+    value?: number;
+    [key: string]: unknown;
+  };
+  action_type?: string;
+  settings?: {
+    delay_seconds?: number;
+    [key: string]: unknown;
+  };
+  links?: { next?: string };
+  [key: string]: unknown;
+}
+
+export interface FlowAction {
+  id: string;
+  type: string;
+  attributes: {
+    definition?: FlowActionDefinition;
     created?: string;
     updated?: string;
-    settings?: {
-      delay_seconds?: number;
-      [key: string]: any;
-    };
-    tracking_options?: any;
-    send_options?: any;
-    render_options?: any;
   };
   relationships?: {
     flow?: { data: { id: string; type: string } };
-    "flow-messages"?: { data: Array<{ id: string; type: string }> };
+    "flow-messages"?: {
+      data?: Array<{ id: string; type: string }>;
+      links?: { self?: string; related?: string };
+    };
+  };
+}
+
+export interface FlowMessageDefinition {
+  from_email?: string;
+  from_label?: string;
+  reply_to_email?: string;
+  cc_email?: string;
+  bcc_email?: string;
+  subject_line?: string;
+  preview_text?: string;
+  template_id?: string;
+  content?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface FlowMessage {
+  id: string;
+  type: string;
+  attributes: {
+    channel?: string;
+    definition?: FlowMessageDefinition;
+    created?: string;
+    updated?: string;
   };
 }
 
@@ -97,7 +165,7 @@ interface Segment {
   type: string;
   attributes: {
     name: string;
-    definition?: any;
+    definition?: JsonObject;
     created?: string;
     updated?: string;
   };
@@ -136,12 +204,54 @@ interface Metric {
   };
 }
 
+interface Form {
+  id: string;
+  type: string;
+  attributes: {
+    name?: string;
+    status?: string;
+    ab_test?: boolean;
+    created_at?: string;
+    updated_at?: string;
+  };
+}
+
+interface FormVersion {
+  id: string;
+  type: string;
+  attributes: {
+    name?: string;
+    form_type?: string;
+    status?: string;
+    ab_test?: boolean | Record<string, unknown>;
+    created_at?: string;
+    updated_at?: string;
+  };
+  relationships?: Record<string, unknown>;
+}
+
+export interface Template {
+  id: string;
+  type: string;
+  attributes: {
+    name?: string;
+    editor_type?: string;
+    html?: string;
+    text?: string;
+    amp?: string;
+    subject?: string;
+    preview_text?: string;
+    created?: string;
+    updated?: string;
+  };
+}
+
 interface Account {
   id: string;
   type: string;
   attributes: {
     test_account: boolean;
-    contact_information?: any;
+    contact_information?: JsonObject;
     industry?: string;
     timezone?: string;
     preferred_currency?: string;
@@ -162,7 +272,71 @@ interface SingleResponse<T> {
   data: T;
 }
 
-// Initialize cache with namespace
+export interface FlowMessageTemplateResponse {
+  data: FlowMessage;
+  included?: Template[];
+}
+
+export interface AllTemplatesResponse {
+  data: Template[];
+  pagesFetched: number;
+}
+
+type CampaignChannel = "email" | "sms" | "mobile_push";
+type MetricAggregateInterval = "hour" | "day" | "week" | "month";
+
+interface CampaignListOptions {
+  channel?: CampaignChannel;
+  filter?: string;
+  pageSize?: number;
+  cursor?: string;
+}
+
+export function buildCampaignsCacheKey(options?: CampaignListOptions): string {
+  const channel = options?.channel || "email";
+  return createCacheKey("campaigns", {
+    revision: API_REVISION,
+    channel,
+    filter: options?.filter,
+    cursor: options?.cursor,
+  });
+}
+
+export function cursorFromNextLink(next?: string): string | undefined {
+  if (!next) return undefined;
+  const url = new URL(next, `${BASE_URL}/`);
+  return url.searchParams.get("page[cursor]") || undefined;
+}
+
+export function buildMetricAggregateBody(options: {
+  metricId: string;
+  start: string;
+  end: string;
+  interval: MetricAggregateInterval;
+  timezone?: string;
+}): Record<string, unknown> {
+  const attributes: Record<string, unknown> = {
+    metric_id: options.metricId,
+    measurements: ["count"],
+    filter: [
+      `greater-or-equal(datetime,${options.start})`,
+      `less-than(datetime,${options.end})`,
+    ],
+    interval: options.interval,
+  };
+
+  if (options.timezone) {
+    attributes.timezone = options.timezone;
+  }
+
+  return {
+    data: {
+      type: "metric-aggregate",
+      attributes,
+    },
+  };
+}
+
 const cache = new PluginCache({
   namespace: "klaviyo-marketing-manager",
   defaultTTL: TTL.FIFTEEN_MINUTES,
@@ -173,114 +347,52 @@ export class KlaviyoClient {
   private cacheDisabled: boolean = false;
   private timeout: number = DEFAULT_TIMEOUT;
 
-  constructor() {
-    // Try multiple locations for config.json:
-    // 1. Same directory (when running tsx directly from scripts/)
-    // 2. Parent directory (when running compiled from dist/)
-    const possiblePaths = [
-      join(__dirname, "config.json"),
-      join(__dirname, "..", "config.json"),
-    ];
-
-    let configFile: ConfigFile | null = null;
-    for (const path of possiblePaths) {
-      try {
-        configFile = JSON.parse(readFileSync(path, "utf-8"));
-        break;
-      } catch {
-        continue;
-      }
+  constructor(options?: { apiKey?: string }) {
+    if (options?.apiKey) {
+      this.apiKey = options.apiKey;
+      return;
     }
 
-    if (!configFile) {
-      throw new Error(`Config file not found. Tried: ${possiblePaths.join(", ")}`);
-    }
-
-    // Support both new direct format and legacy MCP format
-    if (configFile.klaviyo?.apiKey) {
-      this.apiKey = configFile.klaviyo.apiKey;
-    } else if (configFile.mcpServer?.env?.PRIVATE_API_KEY) {
-      // Legacy MCP config - extract API key from env
-      this.apiKey = configFile.mcpServer.env.PRIVATE_API_KEY;
-    } else {
-      throw new Error(
-        "Missing required config: klaviyo.apiKey or mcpServer.env.PRIVATE_API_KEY"
-      );
-    }
+    const raw = loadServiceConfig("klaviyo-marketing-manager");
+    const normalized = normalizeLegacyMcpConfig(raw, {
+      "klaviyo.apiKey": "PRIVATE_API_KEY",
+    });
+    const config = KlaviyoConfigSchema.parse(normalized);
+    this.apiKey = config.klaviyo.apiKey;
   }
 
-  // ============================================
-  // CACHE CONTROL
-  // ============================================
 
-  /**
-   * Disables caching for all subsequent requests.
-   * Useful for debugging or when fresh data is required.
-   */
   disableCache(): void {
     this.cacheDisabled = true;
     cache.disable();
   }
 
-  /**
-   * Re-enables caching after it was disabled.
-   */
   enableCache(): void {
     this.cacheDisabled = false;
     cache.enable();
   }
 
-  /**
-   * Returns cache statistics including hit/miss counts.
-   * @returns Cache stats object with hits, misses, and entry count
-   */
   getCacheStats() {
     return cache.getStats();
   }
 
-  /**
-   * Clears all cached data.
-   * @returns Number of cache entries cleared
-   */
   clearCache(): number {
     return cache.clear();
   }
 
-  /**
-   * Invalidates a specific cache entry by key.
-   * @param key - The cache key to invalidate
-   * @returns true if entry was found and removed, false otherwise
-   */
   invalidateCacheKey(key: string): boolean {
     return cache.invalidate(key);
   }
 
-  /**
-   * Sets the request timeout.
-   * @param ms - Timeout in milliseconds
-   */
   setTimeout(ms: number): void {
     this.timeout = ms;
   }
 
-  // ============================================
-  // HTTP LAYER
-  // ============================================
 
-  /**
-   * Makes an HTTP request to the Klaviyo API.
-   *
-   * @param method - HTTP method (GET, POST)
-   * @param endpoint - API endpoint path
-   * @param body - Request body for POST
-   * @param customTimeout - Override default timeout
-   * @returns Parsed JSON response
-   * @throws {Error} If API returns non-2xx status
-   */
   private async request<T>(
     method: string,
     endpoint: string,
-    body?: Record<string, any>,
+    body?: JsonObject,
     customTimeout?: number
   ): Promise<T> {
     const url = `${BASE_URL}${endpoint}`;
@@ -292,24 +404,24 @@ export class KlaviyoClient {
       "Content-Type": "application/vnd.api+json",
     };
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(
-      () => controller.abort(),
-      customTimeout || this.timeout
-    );
+    const effectiveTimeout = customTimeout || this.timeout;
+
+    const options: RequestInit = {
+      method,
+      headers,
+    };
+
+    if (body) {
+      options.body = JSON.stringify(body);
+    }
 
     try {
-      const options: RequestInit = {
-        method,
-        headers,
-        signal: controller.signal,
-      };
-
-      if (body) {
-        options.body = JSON.stringify(body);
-      }
-
-      const response = await fetch(url, options);
+      const response = await fetchWithRetry(
+        url,
+        options,
+        { maxRetries: 3, timeoutMs: effectiveTimeout },
+        "Klaviyo.request"
+      );
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -317,63 +429,33 @@ export class KlaviyoClient {
       }
 
       return response.json() as Promise<T>;
-    } finally {
-      clearTimeout(timeoutId);
+    } catch (error) {
+      if (error instanceof Error && /(timed out|timeout|abort)/i.test(error.message)) {
+        throw new Error(`Klaviyo API request timed out after ${effectiveTimeout / 1000}s`);
+      }
+      throw error;
     }
   }
 
-  /**
-   * Builds a Klaviyo filter string for message channel.
-   * @param channel - Channel type: "email", "sms", or "mobile_push"
-   * @returns Klaviyo filter string
-   */
   private buildChannelFilter(channel: "email" | "sms" | "mobile_push"): string {
     return `equals(messages.channel,'${channel}')`;
   }
 
-  // ============================================
-  // CAMPAIGN OPERATIONS
-  // ============================================
 
-  /**
-   * Lists marketing campaigns with optional filtering.
-   *
-   * @param options - Filter options
-   * @param options.channel - Channel type: "email" (default), "sms", or "mobile_push"
-   * @param options.filter - Additional Klaviyo filter expression
-   * @param options.pageSize - Results per page
-   * @param options.cursor - Pagination cursor
-   * @returns Paginated list of campaigns
-   *
-   * @cached TTL: 15 minutes
-   *
-   * @example
-   * // Get email campaigns
-   * const { data: campaigns } = await client.getCampaigns();
-   *
-   * @example
-   * // Get SMS campaigns
-   * const { data: smsCampaigns } = await client.getCampaigns({ channel: "sms" });
-   */
   async getCampaigns(options?: {
-    channel?: "email" | "sms" | "mobile_push";
+    channel?: CampaignChannel;
     filter?: string;
     pageSize?: number;
     cursor?: string;
   }): Promise<ListResponse<Campaign>> {
     const channel = options?.channel || "email";
-    const cacheKey = createCacheKey("campaigns", {
-      channel,
-      filter: options?.filter,
-      cursor: options?.cursor,
-    });
+    const cacheKey = buildCampaignsCacheKey(options);
 
     return cache.getOrFetch(
       cacheKey,
       async () => {
         const params = new URLSearchParams();
 
-        // Channel filter is required
         let filterStr = this.buildChannelFilter(channel);
         if (options?.filter) {
           filterStr = `and(${filterStr},${options.filter})`;
@@ -387,11 +469,7 @@ export class KlaviyoClient {
           params.set("page[cursor]", options.cursor);
         }
 
-        // Request common fields
-        params.set(
-          "fields[campaign]",
-          "name,status,archived,audiences,send_options,created_at,updated_at,scheduled_at,send_time"
-        );
+        params.set("fields[campaign]", CAMPAIGN_FIELDS);
 
         return this.request<ListResponse<Campaign>>(
           "GET",
@@ -402,14 +480,6 @@ export class KlaviyoClient {
     );
   }
 
-  /**
-   * Gets a single campaign by ID.
-   *
-   * @param campaignId - Klaviyo campaign ID
-   * @returns Campaign object with details
-   *
-   * @cached TTL: 15 minutes
-   */
   async getCampaign(campaignId: string): Promise<SingleResponse<Campaign>> {
     const cacheKey = createCacheKey("campaign", { id: campaignId });
 
@@ -421,35 +491,29 @@ export class KlaviyoClient {
     );
   }
 
-  /**
-   * Gets campaign performance report with metrics.
-   *
-   * Retrieves detailed performance statistics including opens, clicks,
-   * bounces, unsubscribes, and conversion metrics.
-   *
-   * @param options - Report options
-   * @param options.conversionMetricId - Metric ID for conversion tracking (required)
-   * @param options.campaignIds - Filter to specific campaigns
-   * @param options.timeframe - Time range: { key: "last_30_days" } or { start: "2025-01-01", end: "2025-01-31" }
-   * @param options.statistics - Specific metrics to include (defaults to common metrics)
-   * @returns Campaign performance report with statistics
-   *
-   * @cached TTL: 5 minutes
-   *
-   * @example
-   * // Get report for all campaigns
-   * const metricId = await client.findPlacedOrderMetricId();
-   * const report = await client.getCampaignReport({
-   *   conversionMetricId: metricId,
-   *   timeframe: { key: "last_30_days" }
-   * });
-   */
+  async getCampaignMessages(campaignId: string): Promise<ListResponse<CampaignMessage>> {
+    const cacheKey = createCacheKey("campaign_messages", {
+      revision: API_REVISION,
+      campaignId,
+    });
+
+    return cache.getOrFetch(
+      cacheKey,
+      () =>
+        this.request<ListResponse<CampaignMessage>>(
+          "GET",
+          `/campaigns/${campaignId}/campaign-messages`,
+        ),
+      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled },
+    );
+  }
+
   async getCampaignReport(options: {
     conversionMetricId: string;
     campaignIds?: string[];
     timeframe?: { key: string } | { start: string; end: string };
     statistics?: string[];
-  }): Promise<any> {
+  }): Promise<unknown> {
     const cacheKey = createCacheKey("campaign_report", {
       campaignIds: options?.campaignIds?.join(","),
       timeframe: JSON.stringify(options?.timeframe),
@@ -460,14 +524,6 @@ export class KlaviyoClient {
     return cache.getOrFetch(
       cacheKey,
       async () => {
-        // Default statistics for campaign reports
-        // Valid values: recipients, delivered, delivery_rate, opens, opens_unique,
-        // open_rate, clicks, clicks_unique, click_rate, click_to_open_rate,
-        // bounced, bounce_rate, bounced_or_failed, bounced_or_failed_rate,
-        // failed, failed_rate, spam_complaints, spam_complaint_rate,
-        // unsubscribes, unsubscribe_uniques, unsubscribe_rate,
-        // conversions, conversion_uniques, conversion_rate, conversion_value,
-        // average_order_value, revenue_per_recipient
         const defaultStats = [
           "recipients",
           "delivered",
@@ -489,8 +545,7 @@ export class KlaviyoClient {
 
         const statistics = options?.statistics || defaultStats;
 
-        // Build the request body for campaign values report
-        const body: Record<string, any> = {
+        const body: ReportRequestBody = {
           data: {
             type: "campaign-values-report",
             attributes: {
@@ -500,43 +555,27 @@ export class KlaviyoClient {
           },
         };
 
-        // Add timeframe if provided (object, not string)
         if (options?.timeframe) {
           body.data.attributes.timeframe = options.timeframe;
         }
 
-        // Filter by campaign IDs if provided
         if (options?.campaignIds && options.campaignIds.length > 0) {
           body.data.attributes.filter = `any(campaign_id,[${options.campaignIds
             .map((id) => `"${id}"`)
             .join(",")}])`;
         }
 
-        return this.request<any>(
+        return this.request<unknown>(
           "POST",
           "/campaign-values-reports",
           body,
-          60000 // 60s timeout for reports
+          60000
         );
       },
       { ttl: TTL.FIVE_MINUTES, bypassCache: this.cacheDisabled }
     );
   }
 
-  /**
-   * Finds the "Placed Order" metric ID for conversion tracking.
-   *
-   * Searches metrics for common order placement names.
-   * Used as the conversionMetricId parameter in campaign reports.
-   *
-   * @returns Metric ID if found, null otherwise
-   *
-   * @example
-   * const metricId = await client.findPlacedOrderMetricId();
-   * if (metricId) {
-   *   const report = await client.getCampaignReport({ conversionMetricId: metricId });
-   * }
-   */
   async findPlacedOrderMetricId(): Promise<string | null> {
     const metrics = await this.getMetrics();
     const placedOrder = metrics.data.find(
@@ -547,25 +586,7 @@ export class KlaviyoClient {
     return placedOrder?.id || null;
   }
 
-  // ============================================
-  // FLOW OPERATIONS
-  // ============================================
 
-  /**
-   * Lists automation flows with optional filtering.
-   *
-   * @param options - Filter options
-   * @param options.filter - Klaviyo filter expression
-   * @param options.pageSize - Results per page
-   * @param options.cursor - Pagination cursor
-   * @returns Paginated list of flows
-   *
-   * @cached TTL: 15 minutes
-   *
-   * @example
-   * const { data: flows } = await client.getFlows();
-   * const activeFlows = flows.filter(f => f.attributes.status === "live");
-   */
   async getFlows(options?: {
     filter?: string;
     pageSize?: number;
@@ -606,43 +627,23 @@ export class KlaviyoClient {
     );
   }
 
-  /**
-   * Gets a single flow by ID.
-   *
-   * @param flowId - Klaviyo flow ID
-   * @returns Flow object with details
-   *
-   * @cached TTL: 15 minutes
-   */
   async getFlow(flowId: string): Promise<SingleResponse<Flow>> {
-    const cacheKey = createCacheKey("flow", { id: flowId });
+    const cacheKey = createCacheKey("flow", {
+      id: flowId,
+      revision: API_REVISION,
+      additionalFields: "definition",
+    });
 
     return cache.getOrFetch(
       cacheKey,
-      () => this.request<SingleResponse<Flow>>("GET", `/flows/${flowId}`),
+      () => this.request<SingleResponse<Flow>>(
+        "GET",
+        `/flows/${flowId}?additional-fields[flow]=definition`,
+      ),
       { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
     );
   }
 
-  /**
-   * Gets all actions (steps) for a flow.
-   *
-   * Flow actions describe the sequence of steps in an automation flow,
-   * including triggers, conditions, delays, and message sends.
-   *
-   * @param flowId - Klaviyo flow ID
-   * @param options - Pagination options
-   * @param options.cursor - Pagination cursor for next page
-   * @returns Paginated list of flow actions
-   *
-   * @cached TTL: 15 minutes
-   *
-   * @example
-   * const { data: actions } = await client.getFlowActions("FLOW_ID");
-   * for (const action of actions) {
-   *   console.log(action.attributes.action_type, action.attributes.settings?.delay_seconds);
-   * }
-   */
   async getFlowActions(
     flowId: string,
     options?: { cursor?: string }
@@ -657,17 +658,12 @@ export class KlaviyoClient {
       async () => {
         const params = new URLSearchParams();
 
-        // Request common fields for flow actions
-        params.set(
-          "fields[flow-action]",
-          "action_type,status,created,updated,settings,tracking_options,send_options,render_options"
-        );
+        params.set("fields[flow-action]", "definition");
 
         if (options?.cursor) {
           params.set("page[cursor]", options.cursor);
         }
 
-        // Max 50 per page per API docs
         params.set("page[size]", "50");
 
         const queryString = params.toString();
@@ -680,19 +676,6 @@ export class KlaviyoClient {
     );
   }
 
-  /**
-   * Gets all actions for a flow with automatic pagination.
-   *
-   * Fetches all pages of flow actions for a given flow.
-   * Use with caution on flows with many actions.
-   *
-   * @param flowId - Klaviyo flow ID
-   * @returns All flow actions
-   *
-   * @example
-   * const actions = await client.getAllFlowActions("FLOW_ID");
-   * console.log(`Flow has ${actions.length} actions`);
-   */
   async getAllFlowActions(flowId: string): Promise<FlowAction[]> {
     const allActions: FlowAction[] = [];
     let cursor: string | undefined = undefined;
@@ -701,7 +684,6 @@ export class KlaviyoClient {
       const response = await this.getFlowActions(flowId, { cursor });
       allActions.push(...response.data);
 
-      // Extract cursor from next link if present
       if (response.links?.next) {
         const url = new URL(response.links.next);
         cursor = url.searchParams.get("page[cursor]") || undefined;
@@ -713,34 +695,108 @@ export class KlaviyoClient {
     return allActions;
   }
 
-  /**
-   * Gets flow performance report.
-   *
-   * Retrieves engagement statistics for automation flows.
-   *
-   * @param options - Report options
-   * @param options.flowIds - Filter to specific flows
-   * @param options.timeframe - Time range: { key: "last_30_days" } or { start, end }
-   * @returns Flow performance report with statistics
-   *
-   * @cached TTL: 5 minutes
-   */
-  async getFlowReport(options?: {
-    flowIds?: string[];
-    timeframe?: { key: string } | { start: string; end: string };
-  }): Promise<any> {
-    const cacheKey = createCacheKey("flow_report", {
-      flowIds: options?.flowIds?.join(","),
-      timeframe: JSON.stringify(options?.timeframe),
+  async getFlowMessages(actionId: string): Promise<ListResponse<FlowMessage>> {
+    const cacheKey = createCacheKey("flow_messages", { actionId });
+
+    return cache.getOrFetch(
+      cacheKey,
+      async () => {
+        const params = new URLSearchParams();
+        params.set("fields[flow-message]", "channel,definition");
+
+        const queryString = params.toString();
+        return this.request<ListResponse<FlowMessage>>(
+          "GET",
+          `/flow-actions/${actionId}/flow-messages${queryString ? `?${queryString}` : ""}`
+        );
+      },
+      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+    );
+  }
+
+  async getFlowMessageTemplate(
+    flowMessageId: string
+  ): Promise<FlowMessageTemplateResponse> {
+    const cacheKey = createCacheKey("flow_message_template", {
+      flowMessageId,
+      revision: API_REVISION,
     });
 
     return cache.getOrFetch(
       cacheKey,
       async () => {
-        const body: Record<string, any> = {
+        try {
+          const template = await this.request<SingleResponse<Template>>(
+            "GET",
+            `/flow-messages/${flowMessageId}/template`
+          );
+          const message = await this.request<SingleResponse<FlowMessage>>(
+            "GET",
+            `/flow-messages/${flowMessageId}?fields[flow-message]=channel,definition`
+          );
+          return {
+            data: message.data,
+            included: template.data ? [template.data] : [],
+          };
+        } catch {
+          return this.request<FlowMessageTemplateResponse>(
+            "GET",
+            `/flow-messages/${flowMessageId}?include=template&fields[flow-message]=channel,definition`
+          );
+        }
+      },
+      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+    );
+  }
+
+  async getSendEmailMessages(
+    actionIds: string[],
+    options?: { pacingMs?: number; sleepImpl?: (ms: number) => Promise<void> }
+  ): Promise<Array<{ actionId: string; messages: FlowMessage[]; error?: string }>> {
+    const pacingMs = options?.pacingMs ?? 400;
+    const sleepFn = options?.sleepImpl ?? sleep;
+
+    const results: Array<{ actionId: string; messages: FlowMessage[]; error?: string }> = [];
+
+    for (let index = 0; index < actionIds.length; index++) {
+      const actionId = actionIds[index];
+
+      const isFirst = index === 0;
+      if (!isFirst && pacingMs > 0) {
+        await sleepFn(pacingMs);
+      }
+
+      try {
+        const response = await this.getFlowMessages(actionId);
+        results.push({ actionId, messages: response.data ?? [] });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        results.push({ actionId, messages: [], error: message });
+      }
+    }
+
+    return results;
+  }
+
+  async getFlowReport(options: {
+    conversionMetricId: string;
+    flowIds?: string[];
+    timeframe?: { key: string } | { start: string; end: string };
+  }): Promise<unknown> {
+    const cacheKey = createCacheKey("flow_report", {
+      flowIds: options.flowIds?.join(","),
+      timeframe: JSON.stringify(options.timeframe),
+      conversionMetricId: options.conversionMetricId,
+    });
+
+    return cache.getOrFetch(
+      cacheKey,
+      async () => {
+        const body: ReportRequestBody = {
           data: {
             type: "flow-values-report",
             attributes: {
+              conversion_metric_id: options.conversionMetricId,
               statistics: [
                 "recipients",
                 "delivered",
@@ -755,41 +811,28 @@ export class KlaviyoClient {
           },
         };
 
-        if (options?.timeframe) {
+        if (options.timeframe) {
           body.data.attributes.timeframe = options.timeframe;
         }
 
-        if (options?.flowIds && options.flowIds.length > 0) {
+        if (options.flowIds && options.flowIds.length > 0) {
           body.data.attributes.filter = `any(flow_id,[${options.flowIds
             .map((id) => `"${id}"`)
             .join(",")}])`;
         }
 
-        return this.request<any>(
+        return this.request<unknown>(
           "POST",
           "/flow-values-reports",
           body,
-          60000 // 60s timeout for reports
+          60000
         );
       },
       { ttl: TTL.FIVE_MINUTES, bypassCache: this.cacheDisabled }
     );
   }
 
-  // ============================================
-  // SEGMENT OPERATIONS
-  // ============================================
 
-  /**
-   * Lists audience segments.
-   *
-   * @param options - Pagination options
-   * @param options.pageSize - Results per page
-   * @param options.cursor - Pagination cursor
-   * @returns Paginated list of segments
-   *
-   * @cached TTL: 1 hour
-   */
   async getSegments(options?: {
     pageSize?: number;
     cursor?: string;
@@ -820,14 +863,6 @@ export class KlaviyoClient {
     );
   }
 
-  /**
-   * Gets a single segment by ID.
-   *
-   * @param segmentId - Klaviyo segment ID
-   * @returns Segment object with definition
-   *
-   * @cached TTL: 1 hour
-   */
   async getSegment(segmentId: string): Promise<SingleResponse<Segment>> {
     const cacheKey = createCacheKey("segment", { id: segmentId });
 
@@ -838,20 +873,7 @@ export class KlaviyoClient {
     );
   }
 
-  // ============================================
-  // LIST OPERATIONS
-  // ============================================
 
-  /**
-   * Lists subscriber lists.
-   *
-   * @param options - Pagination options
-   * @param options.pageSize - Results per page
-   * @param options.cursor - Pagination cursor
-   * @returns Paginated list of subscriber lists
-   *
-   * @cached TTL: 1 hour
-   */
   async getLists(options?: {
     pageSize?: number;
     cursor?: string;
@@ -882,14 +904,6 @@ export class KlaviyoClient {
     );
   }
 
-  /**
-   * Gets a single list by ID.
-   *
-   * @param listId - Klaviyo list ID
-   * @returns List object with details
-   *
-   * @cached TTL: 1 hour
-   */
   async getList(listId: string): Promise<SingleResponse<List>> {
     const cacheKey = createCacheKey("list", { id: listId });
 
@@ -900,27 +914,7 @@ export class KlaviyoClient {
     );
   }
 
-  // ============================================
-  // PROFILE OPERATIONS
-  // ============================================
 
-  /**
-   * Lists profiles (customers/subscribers) with optional filtering.
-   *
-   * @param options - Filter options
-   * @param options.filter - Klaviyo filter expression (e.g., "equals(email,'test@example.com')")
-   * @param options.pageSize - Results per page
-   * @param options.cursor - Pagination cursor
-   * @returns Paginated list of profiles
-   *
-   * @cached TTL: 15 minutes
-   *
-   * @example
-   * // Search by email
-   * const { data: profiles } = await client.getProfiles({
-   *   filter: "equals(email,'john@example.com')"
-   * });
-   */
   async getProfiles(options?: {
     filter?: string;
     pageSize?: number;
@@ -961,14 +955,6 @@ export class KlaviyoClient {
     );
   }
 
-  /**
-   * Gets a single profile by ID.
-   *
-   * @param profileId - Klaviyo profile ID
-   * @returns Profile object with contact details
-   *
-   * @cached TTL: 15 minutes
-   */
   async getProfile(profileId: string): Promise<SingleResponse<Profile>> {
     const cacheKey = createCacheKey("profile", { id: profileId });
 
@@ -979,28 +965,7 @@ export class KlaviyoClient {
     );
   }
 
-  // ============================================
-  // METRIC OPERATIONS
-  // ============================================
 
-  /**
-   * Lists tracked metrics.
-   *
-   * Metrics track events like "Placed Order", "Opened Email", etc.
-   *
-   * @param options - Pagination options
-   * @param options.pageSize - Results per page
-   * @param options.cursor - Pagination cursor
-   * @returns Paginated list of metrics
-   *
-   * @cached TTL: 1 hour
-   *
-   * @example
-   * const { data: metrics } = await client.getMetrics();
-   * for (const metric of metrics) {
-   *   console.log(metric.attributes.name);
-   * }
-   */
   async getMetrics(options?: {
     pageSize?: number;
     cursor?: string;
@@ -1031,14 +996,6 @@ export class KlaviyoClient {
     );
   }
 
-  /**
-   * Gets a single metric by ID.
-   *
-   * @param metricId - Klaviyo metric ID
-   * @returns Metric object with details
-   *
-   * @cached TTL: 1 hour
-   */
   async getMetric(metricId: string): Promise<SingleResponse<Metric>> {
     const cacheKey = createCacheKey("metric", { id: metricId });
 
@@ -1049,17 +1006,242 @@ export class KlaviyoClient {
     );
   }
 
-  // ============================================
-  // ACCOUNT OPERATIONS
-  // ============================================
+  async resolveMetricIdByName(metricName: string): Promise<string> {
+    const target = metricName.trim().toLowerCase();
+    const matches: Metric[] = [];
+    let cursor: string | undefined = undefined;
 
-  /**
-   * Gets account information.
-   *
-   * @returns Account object with timezone, currency, and API key info
-   *
-   * @cached TTL: 1 hour
-   */
+    do {
+      const response = await this.getMetrics({ cursor });
+      for (const metric of response.data ?? []) {
+        if (metric.attributes?.name?.trim().toLowerCase() === target) {
+          matches.push(metric);
+        }
+      }
+
+      if (response.links?.next) {
+        const url = new URL(response.links.next);
+        cursor = url.searchParams.get("page[cursor]") || undefined;
+      } else {
+        cursor = undefined;
+      }
+    } while (cursor);
+
+    if (matches.length === 0) {
+      throw new Error(`No Klaviyo metric found named "${metricName}". Use get-metrics to find the metric ID.`);
+    }
+    if (matches.length > 1) {
+      const ids = matches.map((metric) => metric.id).join(", ");
+      throw new Error(`Multiple Klaviyo metrics matched "${metricName}" case-insensitively: ${ids}. Pass --metric-id instead.`);
+    }
+
+    return matches[0].id;
+  }
+
+  async getMetricEventVolume(options: {
+    metricId: string;
+    start: string;
+    end: string;
+    interval: MetricAggregateInterval;
+    timezone?: string;
+  }): Promise<unknown> {
+    const cacheKey = createCacheKey("metric_event_volume", {
+      metricId: options.metricId,
+      start: options.start,
+      end: options.end,
+      interval: options.interval,
+      timezone: options.timezone,
+    });
+
+    return cache.getOrFetch(
+      cacheKey,
+      () =>
+        this.request<unknown>(
+          "POST",
+          "/metric-aggregates",
+          buildMetricAggregateBody(options),
+          60000,
+        ),
+      { ttl: TTL.FIVE_MINUTES, bypassCache: this.cacheDisabled },
+    );
+  }
+
+
+  async getForms(options?: {
+    filter?: string;
+    pageSize?: number;
+    cursor?: string;
+    sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at";
+  }): Promise<ListResponse<Form>> {
+    const cacheKey = createCacheKey("forms", {
+      filter: options?.filter,
+      cursor: options?.cursor,
+      pageSize: options?.pageSize,
+      sort: options?.sort,
+    });
+
+    return cache.getOrFetch(
+      cacheKey,
+      async () => {
+        const params = new URLSearchParams();
+        params.set("fields[form]", "name,status,ab_test,created_at,updated_at");
+        if (options?.filter) params.set("filter", options.filter);
+        if (options?.pageSize) params.set("page[size]", options.pageSize.toString());
+        if (options?.cursor) params.set("page[cursor]", options.cursor);
+        if (options?.sort) params.set("sort", options.sort);
+
+        return this.request<ListResponse<Form>>("GET", `/forms?${params.toString()}`);
+      },
+      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled },
+    );
+  }
+
+  async getForm(formId: string): Promise<SingleResponse<Form>> {
+    const cacheKey = createCacheKey("form", { id: formId, fields: "metadata" });
+    return cache.getOrFetch(
+      cacheKey,
+      () =>
+        this.request<SingleResponse<Form>>(
+          "GET",
+          `/forms/${formId}?fields[form]=name,status,ab_test,created_at,updated_at`,
+        ),
+      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled },
+    );
+  }
+
+  async getFormVersions(formId: string, options?: {
+    filter?: string;
+    pageSize?: number;
+    cursor?: string;
+    sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at";
+  }): Promise<ListResponse<FormVersion>> {
+    const cacheKey = createCacheKey("form_versions", {
+      formId,
+      filter: options?.filter,
+      cursor: options?.cursor,
+      pageSize: options?.pageSize,
+      sort: options?.sort,
+    });
+
+    return cache.getOrFetch(
+      cacheKey,
+      async () => {
+        const params = new URLSearchParams();
+        params.set("fields[form-version]", "form_type,ab_test,ab_test.variation_name,status,created_at,updated_at");
+        if (options?.filter) params.set("filter", options.filter);
+        if (options?.pageSize) params.set("page[size]", options.pageSize.toString());
+        if (options?.cursor) params.set("page[cursor]", options.cursor);
+        if (options?.sort) params.set("sort", options.sort);
+
+        return this.request<ListResponse<FormVersion>>(
+          "GET",
+          `/forms/${formId}/form-versions?${params.toString()}`,
+        );
+      },
+      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled },
+    );
+  }
+
+  async getFormVersion(versionId: string): Promise<SingleResponse<FormVersion>> {
+    const cacheKey = createCacheKey("form_version", {
+      id: versionId,
+      fields: "metadata",
+    });
+
+    return cache.getOrFetch(
+      cacheKey,
+      () =>
+        this.request<SingleResponse<FormVersion>>(
+          "GET",
+          `/form-versions/${versionId}?fields[form-version]=form_type,ab_test,ab_test.variation_name,status,created_at,updated_at`,
+        ),
+      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled },
+    );
+  }
+
+
+  async getTemplates(options?: {
+    pageSize?: number;
+    cursor?: string;
+  }): Promise<ListResponse<Template>> {
+    const pageSize = options?.pageSize ?? 10;
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 10) {
+      throw new Error("Klaviyo templates page size must be an integer from 1 to 10");
+    }
+    const cacheKey = createCacheKey("templates", {
+      revision: API_REVISION,
+      pageSize,
+      cursor: options?.cursor,
+    });
+
+    return cache.getOrFetch(
+      cacheKey,
+      async () => {
+        const params = new URLSearchParams();
+        params.set("page[size]", pageSize.toString());
+        if (options?.cursor) {
+          params.set("page[cursor]", options.cursor);
+        }
+
+        return this.request<ListResponse<Template>>(
+          "GET",
+          `/templates?${params.toString()}`
+        );
+      },
+      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+    );
+  }
+
+  async getAllTemplates(options?: {
+    pageSize?: number;
+    cursor?: string;
+  }): Promise<AllTemplatesResponse> {
+    const templates: Template[] = [];
+    const seenCursors = new Set<string>();
+    let cursor = options?.cursor;
+    let pagesFetched = 0;
+
+    if (cursor) seenCursors.add(cursor);
+
+    do {
+      const response = await this.getTemplates({
+        pageSize: options?.pageSize,
+        cursor,
+      });
+      pagesFetched += 1;
+      templates.push(...(response.data ?? []));
+
+      const nextCursor = cursorFromNextLink(response.links?.next);
+      if (nextCursor && seenCursors.has(nextCursor)) {
+        throw new Error(
+          `Klaviyo templates pagination repeated cursor "${nextCursor}"`
+        );
+      }
+      if (nextCursor) seenCursors.add(nextCursor);
+      cursor = nextCursor;
+    } while (cursor);
+
+    return { data: templates, pagesFetched };
+  }
+
+  async getTemplate(templateId: string): Promise<SingleResponse<Template>> {
+    const cacheKey = createCacheKey("template", {
+      id: templateId,
+      revision: API_REVISION,
+    });
+
+    return cache.getOrFetch(
+      cacheKey,
+      () =>
+        this.request<SingleResponse<Template>>(
+          "GET",
+          `/templates/${templateId}`
+        ),
+      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+    );
+  }
+
+
   async getAccount(): Promise<ListResponse<Account>> {
     return cache.getOrFetch(
       "account",
@@ -1068,20 +1250,12 @@ export class KlaviyoClient {
     );
   }
 
-  // ============================================
-  // UTILITY
-  // ============================================
 
-  /**
-   * Returns list of available CLI commands for this client.
-   * Used for CLI help text generation.
-   *
-   * @returns Array of tool definitions with name and description
-   */
   getTools(): Array<{ name: string; description: string }> {
     return [
       { name: "get-campaigns", description: "List campaigns (email/SMS/push)" },
       { name: "get-campaign", description: "Get a specific campaign by ID" },
+      { name: "get-campaign-messages", description: "Get campaign message subject and sender details" },
       { name: "get-campaign-report", description: "Get campaign performance metrics" },
       { name: "get-flows", description: "List automation flows" },
       { name: "get-flow", description: "Get a specific flow by ID" },
@@ -1095,6 +1269,13 @@ export class KlaviyoClient {
       { name: "get-profile", description: "Get a specific profile by ID" },
       { name: "get-metrics", description: "List tracked metrics" },
       { name: "get-metric", description: "Get a specific metric by ID" },
+      { name: "get-metric-event-volume", description: "Query count event volume for a metric" },
+      { name: "get-forms", description: "List Klaviyo form metadata" },
+      { name: "get-form", description: "Get Klaviyo form metadata by ID" },
+      { name: "get-form-versions", description: "List form-version metadata for a form" },
+      { name: "get-form-version", description: "Get form-version metadata by ID" },
+      { name: "list-templates", description: "List saved email templates" },
+      { name: "get-template", description: "Get a template by template or flow-message ID" },
       { name: "get-account", description: "Get account details" },
       { name: "cache-stats", description: "Show cache statistics" },
       { name: "cache-clear", description: "Clear all cached data" },
