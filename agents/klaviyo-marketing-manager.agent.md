@@ -1,7 +1,6 @@
 ---
 name: klaviyo-marketing-manager
 description: Use this agent for Klaviyo email marketing operations including campaigns, flows, segments, profiles, and analytics. This agent has exclusive access to the Klaviyo MCP server.
-model: claude-opus-4-6
 color: error
 mode: subagent
 ---
