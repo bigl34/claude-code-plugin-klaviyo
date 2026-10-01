@@ -290,6 +290,14 @@ interface CampaignListOptions {
   filter?: string;
   pageSize?: number;
   cursor?: string;
+  updatedSince?: string;
+}
+
+interface FlowListOptions {
+  filter?: string;
+  pageSize?: number;
+  cursor?: string;
+  updatedSince?: string;
 }
 
 export function buildCampaignsCacheKey(options?: CampaignListOptions): string {
@@ -298,8 +306,35 @@ export function buildCampaignsCacheKey(options?: CampaignListOptions): string {
     revision: API_REVISION,
     channel,
     filter: options?.filter,
+    pageSize: options?.pageSize,
     cursor: options?.cursor,
+    updatedSince: options?.updatedSince,
   });
+}
+
+export function buildFlowsCacheKey(options?: FlowListOptions): string {
+  return createCacheKey("flows", {
+    filter: options?.filter,
+    pageSize: options?.pageSize,
+    cursor: options?.cursor,
+    updatedSince: options?.updatedSince,
+  });
+}
+
+export function toFilterDatetime(value: string): string {
+  const epochMs = Date.parse(value);
+  if (Number.isNaN(epochMs)) {
+    throw new Error(`Invalid datetime for a Klaviyo filter: "${value}"`);
+  }
+  const wholeSecondMs = Math.floor(epochMs / 1000) * 1000;
+  const wholeSecondIso = new Date(wholeSecondMs).toISOString();
+  return wholeSecondIso.replace(".000Z", "Z");
+}
+
+function combineFilters(clauses: string[]): string | undefined {
+  if (clauses.length === 0) return undefined;
+  if (clauses.length === 1) return clauses[0];
+  return `and(${clauses.join(",")})`;
 }
 
 export function cursorFromNextLink(next?: string): string | undefined {
@@ -344,7 +379,6 @@ const cache = new PluginCache({
 
 export class KlaviyoClient {
   private apiKey: string;
-  private cacheDisabled: boolean = false;
   private timeout: number = DEFAULT_TIMEOUT;
 
   constructor(options?: { apiKey?: string }) {
@@ -363,12 +397,10 @@ export class KlaviyoClient {
 
 
   disableCache(): void {
-    this.cacheDisabled = true;
     cache.disable();
   }
 
   enableCache(): void {
-    this.cacheDisabled = false;
     cache.enable();
   }
 
@@ -442,12 +474,7 @@ export class KlaviyoClient {
   }
 
 
-  async getCampaigns(options?: {
-    channel?: CampaignChannel;
-    filter?: string;
-    pageSize?: number;
-    cursor?: string;
-  }): Promise<ListResponse<Campaign>> {
+  async getCampaigns(options?: CampaignListOptions): Promise<ListResponse<Campaign>> {
     const channel = options?.channel || "email";
     const cacheKey = buildCampaignsCacheKey(options);
 
@@ -456,11 +483,18 @@ export class KlaviyoClient {
       async () => {
         const params = new URLSearchParams();
 
-        let filterStr = this.buildChannelFilter(channel);
+        const clauses = [this.buildChannelFilter(channel)];
         if (options?.filter) {
-          filterStr = `and(${filterStr},${options.filter})`;
+          clauses.push(options.filter);
         }
-        params.set("filter", filterStr);
+        if (options?.updatedSince) {
+          const since = toFilterDatetime(options.updatedSince);
+          clauses.push(`greater-or-equal(updated_at,${since})`);
+        }
+        const filterStr = combineFilters(clauses);
+        if (filterStr) {
+          params.set("filter", filterStr);
+        }
 
         if (options?.pageSize) {
           params.set("page[size]", options.pageSize.toString());
@@ -476,7 +510,7 @@ export class KlaviyoClient {
           `/campaigns?${params.toString()}`
         );
       },
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -487,7 +521,7 @@ export class KlaviyoClient {
       cacheKey,
       () =>
         this.request<SingleResponse<Campaign>>("GET", `/campaigns/${campaignId}`),
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -504,7 +538,7 @@ export class KlaviyoClient {
           "GET",
           `/campaigns/${campaignId}/campaign-messages`,
         ),
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled },
+      { ttl: TTL.FIFTEEN_MINUTES },
     );
   }
 
@@ -572,7 +606,7 @@ export class KlaviyoClient {
           60000
         );
       },
-      { ttl: TTL.FIVE_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIVE_MINUTES }
     );
   }
 
@@ -587,23 +621,26 @@ export class KlaviyoClient {
   }
 
 
-  async getFlows(options?: {
-    filter?: string;
-    pageSize?: number;
-    cursor?: string;
-  }): Promise<ListResponse<Flow>> {
-    const cacheKey = createCacheKey("flows", {
-      filter: options?.filter,
-      cursor: options?.cursor,
-    });
+  async getFlows(options?: FlowListOptions): Promise<ListResponse<Flow>> {
+    const cacheKey = buildFlowsCacheKey(options);
 
     return cache.getOrFetch(
       cacheKey,
       async () => {
         const params = new URLSearchParams();
 
+        const clauses: string[] = [];
         if (options?.filter) {
-          params.set("filter", options.filter);
+          clauses.push(options.filter);
+        }
+        if (options?.updatedSince) {
+          const since = toFilterDatetime(options.updatedSince);
+          clauses.push(`greater-or-equal(updated,${since})`);
+          params.set("sort", "updated");
+        }
+        const filterStr = combineFilters(clauses);
+        if (filterStr) {
+          params.set("filter", filterStr);
         }
         if (options?.pageSize) {
           params.set("page[size]", options.pageSize.toString());
@@ -623,7 +660,7 @@ export class KlaviyoClient {
           `/flows${queryString ? `?${queryString}` : ""}`
         );
       },
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -640,7 +677,7 @@ export class KlaviyoClient {
         "GET",
         `/flows/${flowId}?additional-fields[flow]=definition`,
       ),
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -672,24 +709,25 @@ export class KlaviyoClient {
           `/flows/${flowId}/flow-actions${queryString ? `?${queryString}` : ""}`
         );
       },
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
   async getAllFlowActions(flowId: string): Promise<FlowAction[]> {
     const allActions: FlowAction[] = [];
+    const seenCursors = new Set<string>();
     let cursor: string | undefined = undefined;
 
     do {
       const response = await this.getFlowActions(flowId, { cursor });
       allActions.push(...response.data);
 
-      if (response.links?.next) {
-        const url = new URL(response.links.next);
-        cursor = url.searchParams.get("page[cursor]") || undefined;
-      } else {
-        cursor = undefined;
+      const nextCursor = cursorFromNextLink(response.links?.next);
+      if (nextCursor && seenCursors.has(nextCursor)) {
+        throw new Error(`Klaviyo flow actions pagination repeated cursor "${nextCursor}"`);
       }
+      if (nextCursor) seenCursors.add(nextCursor);
+      cursor = nextCursor;
     } while (cursor);
 
     return allActions;
@@ -710,7 +748,7 @@ export class KlaviyoClient {
           `/flow-actions/${actionId}/flow-messages${queryString ? `?${queryString}` : ""}`
         );
       },
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -745,7 +783,7 @@ export class KlaviyoClient {
           );
         }
       },
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -828,7 +866,7 @@ export class KlaviyoClient {
           60000
         );
       },
-      { ttl: TTL.FIVE_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIVE_MINUTES }
     );
   }
 
@@ -837,7 +875,7 @@ export class KlaviyoClient {
     pageSize?: number;
     cursor?: string;
   }): Promise<ListResponse<Segment>> {
-    const cacheKey = createCacheKey("segments", { cursor: options?.cursor });
+    const cacheKey = createCacheKey("segments", { pageSize: options?.pageSize, cursor: options?.cursor });
 
     return cache.getOrFetch(
       cacheKey,
@@ -859,7 +897,7 @@ export class KlaviyoClient {
           `/segments${queryString ? `?${queryString}` : ""}`
         );
       },
-      { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
+      { ttl: TTL.HOUR }
     );
   }
 
@@ -869,7 +907,7 @@ export class KlaviyoClient {
     return cache.getOrFetch(
       cacheKey,
       () => this.request<SingleResponse<Segment>>("GET", `/segments/${segmentId}`),
-      { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
+      { ttl: TTL.HOUR }
     );
   }
 
@@ -878,7 +916,7 @@ export class KlaviyoClient {
     pageSize?: number;
     cursor?: string;
   }): Promise<ListResponse<List>> {
-    const cacheKey = createCacheKey("lists", { cursor: options?.cursor });
+    const cacheKey = createCacheKey("lists", { pageSize: options?.pageSize, cursor: options?.cursor });
 
     return cache.getOrFetch(
       cacheKey,
@@ -900,7 +938,7 @@ export class KlaviyoClient {
           `/lists${queryString ? `?${queryString}` : ""}`
         );
       },
-      { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
+      { ttl: TTL.HOUR }
     );
   }
 
@@ -910,7 +948,7 @@ export class KlaviyoClient {
     return cache.getOrFetch(
       cacheKey,
       () => this.request<SingleResponse<List>>("GET", `/lists/${listId}`),
-      { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
+      { ttl: TTL.HOUR }
     );
   }
 
@@ -922,6 +960,7 @@ export class KlaviyoClient {
   }): Promise<ListResponse<Profile>> {
     const cacheKey = createCacheKey("profiles", {
       filter: options?.filter,
+      pageSize: options?.pageSize,
       cursor: options?.cursor,
     });
 
@@ -951,7 +990,7 @@ export class KlaviyoClient {
           `/profiles${queryString ? `?${queryString}` : ""}`
         );
       },
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -961,7 +1000,7 @@ export class KlaviyoClient {
     return cache.getOrFetch(
       cacheKey,
       () => this.request<SingleResponse<Profile>>("GET", `/profiles/${profileId}`),
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -970,7 +1009,7 @@ export class KlaviyoClient {
     pageSize?: number;
     cursor?: string;
   }): Promise<ListResponse<Metric>> {
-    const cacheKey = createCacheKey("metrics", { cursor: options?.cursor });
+    const cacheKey = createCacheKey("metrics", { pageSize: options?.pageSize, cursor: options?.cursor });
 
     return cache.getOrFetch(
       cacheKey,
@@ -992,7 +1031,7 @@ export class KlaviyoClient {
           `/metrics${queryString ? `?${queryString}` : ""}`
         );
       },
-      { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
+      { ttl: TTL.HOUR }
     );
   }
 
@@ -1002,13 +1041,14 @@ export class KlaviyoClient {
     return cache.getOrFetch(
       cacheKey,
       () => this.request<SingleResponse<Metric>>("GET", `/metrics/${metricId}`),
-      { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
+      { ttl: TTL.HOUR }
     );
   }
 
   async resolveMetricIdByName(metricName: string): Promise<string> {
     const target = metricName.trim().toLowerCase();
     const matches: Metric[] = [];
+    const seenCursors = new Set<string>();
     let cursor: string | undefined = undefined;
 
     do {
@@ -1019,12 +1059,12 @@ export class KlaviyoClient {
         }
       }
 
-      if (response.links?.next) {
-        const url = new URL(response.links.next);
-        cursor = url.searchParams.get("page[cursor]") || undefined;
-      } else {
-        cursor = undefined;
+      const nextCursor = cursorFromNextLink(response.links?.next);
+      if (nextCursor && seenCursors.has(nextCursor)) {
+        throw new Error(`Klaviyo metrics pagination repeated cursor "${nextCursor}"`);
       }
+      if (nextCursor) seenCursors.add(nextCursor);
+      cursor = nextCursor;
     } while (cursor);
 
     if (matches.length === 0) {
@@ -1062,7 +1102,7 @@ export class KlaviyoClient {
           buildMetricAggregateBody(options),
           60000,
         ),
-      { ttl: TTL.FIVE_MINUTES, bypassCache: this.cacheDisabled },
+      { ttl: TTL.FIVE_MINUTES },
     );
   }
 
@@ -1092,7 +1132,7 @@ export class KlaviyoClient {
 
         return this.request<ListResponse<Form>>("GET", `/forms?${params.toString()}`);
       },
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled },
+      { ttl: TTL.FIFTEEN_MINUTES },
     );
   }
 
@@ -1105,7 +1145,7 @@ export class KlaviyoClient {
           "GET",
           `/forms/${formId}?fields[form]=name,status,ab_test,created_at,updated_at`,
         ),
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled },
+      { ttl: TTL.FIFTEEN_MINUTES },
     );
   }
 
@@ -1138,7 +1178,7 @@ export class KlaviyoClient {
           `/forms/${formId}/form-versions?${params.toString()}`,
         );
       },
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled },
+      { ttl: TTL.FIFTEEN_MINUTES },
     );
   }
 
@@ -1155,7 +1195,7 @@ export class KlaviyoClient {
           "GET",
           `/form-versions/${versionId}?fields[form-version]=form_type,ab_test,ab_test.variation_name,status,created_at,updated_at`,
         ),
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled },
+      { ttl: TTL.FIFTEEN_MINUTES },
     );
   }
 
@@ -1188,7 +1228,7 @@ export class KlaviyoClient {
           `/templates?${params.toString()}`
         );
       },
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -1237,7 +1277,7 @@ export class KlaviyoClient {
           "GET",
           `/templates/${templateId}`
         ),
-      { ttl: TTL.FIFTEEN_MINUTES, bypassCache: this.cacheDisabled }
+      { ttl: TTL.FIFTEEN_MINUTES }
     );
   }
 
@@ -1246,42 +1286,11 @@ export class KlaviyoClient {
     return cache.getOrFetch(
       "account",
       () => this.request<ListResponse<Account>>("GET", "/accounts"),
-      { ttl: TTL.HOUR, bypassCache: this.cacheDisabled }
+      { ttl: TTL.HOUR }
     );
   }
 
 
-  getTools(): Array<{ name: string; description: string }> {
-    return [
-      { name: "get-campaigns", description: "List campaigns (email/SMS/push)" },
-      { name: "get-campaign", description: "Get a specific campaign by ID" },
-      { name: "get-campaign-messages", description: "Get campaign message subject and sender details" },
-      { name: "get-campaign-report", description: "Get campaign performance metrics" },
-      { name: "get-flows", description: "List automation flows" },
-      { name: "get-flow", description: "Get a specific flow by ID" },
-      { name: "get-flow-actions", description: "Get actions (steps) for a flow" },
-      { name: "get-flow-report", description: "Get flow performance metrics" },
-      { name: "get-segments", description: "List audience segments" },
-      { name: "get-segment", description: "Get a specific segment by ID" },
-      { name: "get-lists", description: "List subscriber lists" },
-      { name: "get-list", description: "Get a specific list by ID" },
-      { name: "get-profiles", description: "List profiles with optional filter" },
-      { name: "get-profile", description: "Get a specific profile by ID" },
-      { name: "get-metrics", description: "List tracked metrics" },
-      { name: "get-metric", description: "Get a specific metric by ID" },
-      { name: "get-metric-event-volume", description: "Query count event volume for a metric" },
-      { name: "get-forms", description: "List Klaviyo form metadata" },
-      { name: "get-form", description: "Get Klaviyo form metadata by ID" },
-      { name: "get-form-versions", description: "List form-version metadata for a form" },
-      { name: "get-form-version", description: "Get form-version metadata by ID" },
-      { name: "list-templates", description: "List saved email templates" },
-      { name: "get-template", description: "Get a template by template or flow-message ID" },
-      { name: "get-account", description: "Get account details" },
-      { name: "cache-stats", description: "Show cache statistics" },
-      { name: "cache-clear", description: "Clear all cached data" },
-      { name: "cache-invalidate", description: "Invalidate a specific cache key" },
-    ];
-  }
 }
 
 export default KlaviyoClient;

@@ -1,6 +1,7 @@
 #!/usr/bin/env npx tsx
 
 import { z, createCommand, runCli, cacheCommands, cliTypes, wrapUntrustedField, buildSafeOutput, TRUNCATION_DEFAULTS } from "@local/cli-utils";
+import { realpathSync } from "fs";
 import { pathToFileURL } from "url";
 import {
   KlaviyoClient,
@@ -442,7 +443,10 @@ async function resolveConversionMetricId(
 export const commands = {
   "list-tools": createCommand(
     z.object({}),
-    async (_args, client: KlaviyoClient) => client.getTools(),
+    async (): Promise<Array<{ name: string; description: string }>> => Object.entries(commands).map(([name, command]) => ({
+      name,
+      description: command.description ?? "",
+    })),
     "List all available commands",
     { sideEffect: "read" }
   ),
@@ -451,22 +455,42 @@ export const commands = {
     z.object({
       filter: z.string().optional().describe("Filter string for queries"),
       channel: z.enum(["email", "sms", "mobile_push"]).optional().describe("Channel type"),
+      pageSize: cliTypes.int(1, 100).optional().describe("Campaigns per page (Klaviyo maximum: 100)"),
+      cursor: z.string().min(1).optional().describe("Opaque pagination cursor from metadata.next_cursor"),
+      updatedSince: z.string().min(1).optional().describe("Only campaigns whose updated_at is at or after this ISO 8601 datetime"),
     }),
     async (args, client: KlaviyoClient) => {
-      const { filter, channel } = args as {
-        filter?: string; channel?: "email" | "sms" | "mobile_push";
+      const { filter, channel, pageSize, cursor, updatedSince } = args as {
+        filter?: string;
+        channel?: "email" | "sms" | "mobile_push";
+        pageSize?: number;
+        cursor?: string;
+        updatedSince?: string;
       };
-      const result = await client.getCampaigns({ filter, channel });
+      const effectiveChannel = channel ?? "email";
+      const result = await client.getCampaigns({ filter, channel: effectiveChannel, pageSize, cursor, updatedSince });
 
       const wrappedCampaigns = dataArray(result)
-        .map((c) => normalizeCampaignForOutput(c, channel));
+        .map((c) => normalizeCampaignForOutput(c, effectiveChannel));
+      const nextCursor = cursorFromNextLink(result.links?.next);
+      const hasMore = Boolean(result.links?.next);
 
       return buildSafeOutput(
-        { command: "get-campaigns", count: wrappedCampaigns.length },
+        {
+          command: "get-campaigns",
+          channel: effectiveChannel,
+          count: wrappedCampaigns.length,
+          page_size: pageSize ?? null,
+          updated_since: updatedSince ?? null,
+          requested_cursor: cursor ?? null,
+          next_cursor: nextCursor ?? null,
+          has_more: hasMore,
+          coverage: "single_page",
+        },
         { campaigns: wrappedCampaigns }
       );
     },
-    "List all campaigns",
+    "List one page of campaigns for a channel; for the next page repeat the same flags with --cursor set to metadata.next_cursor",
     { sideEffect: "read" }
   ),
 
@@ -571,10 +595,18 @@ export const commands = {
   "get-flows": createCommand(
     z.object({
       filter: z.string().optional().describe("Filter string for queries"),
+      pageSize: cliTypes.int(1, 50).optional().describe("Flows per page (Klaviyo maximum: 50)"),
+      cursor: z.string().min(1).optional().describe("Opaque pagination cursor from metadata.next_cursor"),
+      updatedSince: z.string().min(1).optional().describe("Only flows whose updated time is at or after this ISO 8601 datetime"),
     }),
     async (args, client: KlaviyoClient) => {
-      const { filter } = args as { filter?: string };
-      const result = await client.getFlows({ filter });
+      const { filter, pageSize, cursor, updatedSince } = args as {
+        filter?: string;
+        pageSize?: number;
+        cursor?: string;
+        updatedSince?: string;
+      };
+      const result = await client.getFlows({ filter, pageSize, cursor, updatedSince });
 
       const wrappedFlows = dataArray(result).map((f) => {
         const attrs = attrsOf(f);
@@ -601,12 +633,24 @@ export const commands = {
         };
       });
 
+      const nextCursor = cursorFromNextLink(result.links?.next);
+      const hasMore = Boolean(result.links?.next);
+
       return buildSafeOutput(
-        { command: "get-flows", count: wrappedFlows.length },
+        {
+          command: "get-flows",
+          count: wrappedFlows.length,
+          page_size: pageSize ?? null,
+          updated_since: updatedSince ?? null,
+          requested_cursor: cursor ?? null,
+          next_cursor: nextCursor ?? null,
+          has_more: hasMore,
+          coverage: "single_page",
+        },
         { flows: wrappedFlows }
       );
     },
-    "List all flows",
+    "List one page of flows; for the next page repeat the same flags with --cursor set to metadata.next_cursor",
     { sideEffect: "read" }
   ),
 
@@ -1142,7 +1186,16 @@ export const commands = {
   ...cacheCommands<KlaviyoClient>(),
 };
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+let isCliEntry = false;
+try {
+  isCliEntry =
+    process.argv[1] !== undefined &&
+    import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
+} catch {
+  isCliEntry = false;
+}
+
+if (isCliEntry) {
   runCli(commands, KlaviyoClient, {
     programName: "klaviyo-cli",
     description: "Klaviyo email marketing operations",

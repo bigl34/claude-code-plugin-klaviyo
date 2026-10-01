@@ -39,7 +39,7 @@ Run commands using: `npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- <comm
 
 | Command | Description | Options |
 |---------|-------------|---------|
-| `get-campaigns` | List all campaigns | `--filter`, `--channel` (email/sms/mobile_push, default: email) |
+| `get-campaigns` | List one page of campaigns for a channel | `--filter`, `--channel` (email/sms/mobile_push, default: email), `--page-size` (1-100), `--cursor`, `--updated-since` (ISO 8601) |
 | `get-campaign` | Get campaign details | `--campaign` (required) |
 | `get-campaign-messages` | Read-only: get actual message subject, preview, sender fields, and parent-campaign tracking settings | `--campaign` (required) |
 | `get-campaign-report` | Get performance metrics | `--timeframe`, `--statistics`, `--conversion-metric` |
@@ -56,7 +56,7 @@ the result. Only the fixed tracking boolean switches are trusted metadata.
 
 | Command | Description | Options |
 |---------|-------------|---------|
-| `get-flows` | List all flows | `--filter` |
+| `get-flows` | List one page of flows | `--filter`, `--page-size` (1-50), `--cursor`, `--updated-since` (ISO 8601) |
 | `get-flow` | Get flow details | `--flow` (required) |
 | `get-flow-actions` | Get flow action steps | `--flow` (required), `--all` (optional, paginate all) |
 | `get-flow-report` | Get flow performance | `--timeframe`, `--conversion-metric` (optional override) |
@@ -132,8 +132,14 @@ templates may not appear in `list-templates`; use
 ### Usage Examples
 
 ```bash
-# List all campaigns
-npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- get-campaigns
+# List email campaigns (first page; up to 100 per page)
+npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- get-campaigns --page-size 100
+
+# Next page: repeat the same flags plus metadata.next_cursor while metadata.has_more is true
+npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- get-campaigns --page-size 100 --cursor <next_cursor>
+
+# Campaigns changed since a date
+npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- get-campaigns --updated-since 2026-09-01T00:00:00Z
 
 # Get specific campaign details
 npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- get-campaign --campaign abc123
@@ -144,8 +150,8 @@ npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- get-campaign-messages --ca
 # Get campaign performance report
 npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- get-campaign-report --timeframe "last_30_days"
 
-# List all flows
-npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- get-flows
+# List flows (first page; up to 50 per page)
+npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- get-flows --page-size 50
 
 # Get flow action steps (message sequences, delays, conditions)
 npm --prefix "$CLAUDE_PLUGIN_ROOT/scripts" run cli -- get-flow-actions --flow abc123
@@ -209,7 +215,8 @@ All CLI commands output JSON. Parse the JSON response and present relevant infor
 - **Saved and flow-managed templates differ**: `list-templates` covers the
   saved/library collection. Resolve flow-managed content through
   `get-template --flow-message`.
-- **Channel required for campaigns**: The `get-campaigns` command defaults to `email` channel. Use `--channel sms` or `--channel mobile_push` for other types.
+- **Channel required for campaigns**: The `get-campaigns` command defaults to `email` channel. Use `--channel sms` or `--channel mobile_push` for other types; Klaviyo cannot list several channels in one request.
+- **Campaign and flow lists are paged**: `get-campaigns` and `get-flows` return one page. While `metadata.has_more` is true, rerun with the same `--channel`, `--filter`, `--updated-since` and `--page-size` plus `--cursor <metadata.next_cursor>`; a cursor is only valid for the query that produced it. `count` is the page count, not the account total. Klaviyo's page maximums are 100 campaigns and 50 flows.
 - **Forms are metadata-only**: The Forms API exposes form and form-version resources. This CLI intentionally limits form commands to metadata and does not fetch rendered form HTML or final copy.
 
 ## Key Metrics

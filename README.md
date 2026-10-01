@@ -3,17 +3,17 @@
 
 Dedicated agent for Klaviyo email marketing operations via direct API
 
-![Version](https://img.shields.io/badge/version-1.6.1-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
+![Version](https://img.shields.io/badge/version-1.6.2-blue) ![License: MIT](https://img.shields.io/badge/License-MIT-green) ![Node >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)
 
 ## Features
 
 - Campaign
-- **get-campaigns** — List all campaigns
+- **get-campaigns** — List one page of campaigns for a channel
 - **get-campaign** — Get campaign details
 - **get-campaign-messages** — Read-only: get actual message subject, preview, sender fields, and parent-campaign tracking settings
 - **get-campaign-report** — Get performance metrics
 - Flow
-- **get-flows** — List all flows
+- **get-flows** — List one page of flows
 - **get-flow** — Get flow details
 - **get-flow-actions** — Get flow action steps
 - **get-flow-report** — Get flow performance
@@ -75,21 +75,21 @@ npm --prefix scripts run cli -- get-campaigns
 
 ### Campaign Commands
 
-| Command                 | Description                                                                                          | Options                                                         |
-| ----------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `get-campaigns`         | List all campaigns                                                                                   | `--filter`, `--channel` (email/sms/mobile_push, default: email) |
-| `get-campaign`          | Get campaign details                                                                                 | `--campaign` (required)                                         |
-| `get-campaign-messages` | Read-only: get actual message subject, preview, sender fields, and parent-campaign tracking settings | `--campaign` (required)                                         |
-| `get-campaign-report`   | Get performance metrics                                                                              | `--timeframe`, `--statistics`, `--conversion-metric`            |
+| Command                 | Description                                                                                          | Options                                                                                                                          |
+| ----------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `get-campaigns`         | List one page of campaigns for a channel                                                             | `--filter`, `--channel` (email/sms/mobile_push, default: email), `--page-size` (1-100), `--cursor`, `--updated-since` (ISO 8601) |
+| `get-campaign`          | Get campaign details                                                                                 | `--campaign` (required)                                                                                                          |
+| `get-campaign-messages` | Read-only: get actual message subject, preview, sender fields, and parent-campaign tracking settings | `--campaign` (required)                                                                                                          |
+| `get-campaign-report`   | Get performance metrics                                                                              | `--timeframe`, `--statistics`, `--conversion-metric`                                                                             |
 
 ### Flow Commands
 
-| Command            | Description           | Options                                                  |
-| ------------------ | --------------------- | -------------------------------------------------------- |
-| `get-flows`        | List all flows        | `--filter`                                               |
-| `get-flow`         | Get flow details      | `--flow` (required)                                      |
-| `get-flow-actions` | Get flow action steps | `--flow` (required), `--all` (optional, paginate all)    |
-| `get-flow-report`  | Get flow performance  | `--timeframe`, `--conversion-metric` (optional override) |
+| Command            | Description            | Options                                                                    |
+| ------------------ | ---------------------- | -------------------------------------------------------------------------- |
+| `get-flows`        | List one page of flows | `--filter`, `--page-size` (1-50), `--cursor`, `--updated-since` (ISO 8601) |
+| `get-flow`         | Get flow details       | `--flow` (required)                                                        |
+| `get-flow-actions` | Get flow action steps  | `--flow` (required), `--all` (optional, paginate all)                      |
+| `get-flow-report`  | Get flow performance   | `--timeframe`, `--conversion-metric` (optional override)                   |
 
 ### Segment Commands
 
@@ -151,8 +151,14 @@ npm --prefix scripts run cli -- get-campaigns
 ## Usage Examples
 
 ```bash
-# List all campaigns
-npm --prefix "scripts" run cli -- get-campaigns
+# List email campaigns (first page; up to 100 per page)
+npm --prefix "scripts" run cli -- get-campaigns --page-size 100
+
+# Next page: repeat the same flags plus metadata.next_cursor while metadata.has_more is true
+npm --prefix "scripts" run cli -- get-campaigns --page-size 100 --cursor <next_cursor>
+
+# Campaigns changed since a date
+npm --prefix "scripts" run cli -- get-campaigns --updated-since 2026-09-01T00:00:00Z
 
 # Get specific campaign details
 npm --prefix "scripts" run cli -- get-campaign --campaign abc123
@@ -163,8 +169,8 @@ npm --prefix "scripts" run cli -- get-campaign-messages --campaign abc123
 # Get campaign performance report
 npm --prefix "scripts" run cli -- get-campaign-report --timeframe "last_30_days"
 
-# List all flows
-npm --prefix "scripts" run cli -- get-flows
+# List flows (first page; up to 50 per page)
+npm --prefix "scripts" run cli -- get-flows --page-size 50
 
 # Get flow action steps (message sequences, delays, conditions)
 npm --prefix "scripts" run cli -- get-flow-actions --flow abc123
@@ -223,7 +229,8 @@ This plugin connects directly to the service's HTTP API. The CLI handles authent
 - **Saved and flow-managed templates differ**: `list-templates` covers the
   saved/library collection. Resolve flow-managed content through
   `get-template --flow-message`.
-- **Channel required for campaigns**: The `get-campaigns` command defaults to `email` channel. Use `--channel sms` or `--channel mobile_push` for other types.
+- **Channel required for campaigns**: The `get-campaigns` command defaults to `email` channel. Use `--channel sms` or `--channel mobile_push` for other types; Klaviyo cannot list several channels in one request.
+- **Campaign and flow lists are paged**: `get-campaigns` and `get-flows` return one page. While `metadata.has_more` is true, rerun with the same `--channel`, `--filter`, `--updated-since` and `--page-size` plus `--cursor <metadata.next_cursor>`; a cursor is only valid for the query that produced it. `count` is the page count, not the account total. Klaviyo's page maximums are 100 campaigns and 50 flows.
 - **Forms are metadata-only**: The Forms API exposes form and form-version resources. This CLI intentionally limits form commands to metadata and does not fetch rendered form HTML or final copy.
 
 ## Contributing
